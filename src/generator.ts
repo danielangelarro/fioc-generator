@@ -150,36 +150,25 @@ export class FiocGenerator {
   private async writeOutputFile(outputPath: string) {
     const file = this.project.createSourceFile(outputPath, "", { overwrite: true });
 
-    // 1. Imports base
     file.addImportDeclaration({
       moduleSpecifier: "@fioc/core",
-      namedImports: ["createDIToken", "buildDIContainer"]
+      namedImports: ["createDIToken", "buildDIContainer", "constructorToFactory"]
     });
 
-    // 2. Importar los archivos fuente analizados
-    // (Simplificación: Importamos todo lo necesario. En prod, calcular rutas relativas)
     const processedFiles = new Set<string>();
     [...this.registry.getAllTokens(), ...this.registry.getAllInjectables()].forEach(item => {
         if(processedFiles.has(item.filePath)) return;
         
-        // Calcular ruta relativa desde outputPath hacia item.filePath
         let relativePath = path.relative(path.dirname(outputPath), item.filePath);
         if (!relativePath.startsWith(".")) relativePath = "./" + relativePath;
-        relativePath = relativePath.replace(/\.ts$/, ""); // Quitar extensión
+        relativePath = relativePath.replace(/\.ts$/, "");
+        relativePath = relativePath.replace(/\\/g, "/"); // Normalizar a forward slashes para imports
 
-        // Importamos el símbolo (Clase, Interfaz, Variable)
-        // Nota: Las interfaces solo se importan si se usan como valor, pero aquí solo necesitamos
-        // importar las Clases y Funciones reales para pasarlas al contenedor.
-        // Las interfaces solo sirven para generar el token string.
-        
-        // En este paso simplificado, importamos todo lo que tenga 'nodeName' (si es clase/valor)
-        // Si es interfaz pura, no necesitamos importarla en el JS generado, solo su nombre string.
-        if (!(item as any).isInterface) {
-             file.addImportDeclaration({
-                defaultImport: "* as " + path.basename(item.filePath).replace(/\W/g, '_'), // Namespace import seguro
-                moduleSpecifier: relativePath
-            });
-        }
+
+        file.addImportDeclaration({
+            namespaceImport: path.basename(item.filePath).replace(/\W/g, '_'),
+            moduleSpecifier: relativePath
+        });
         processedFiles.add(item.filePath);
     });
     
@@ -196,29 +185,24 @@ export class FiocGenerator {
     });
 
     writer.setBodyText(writer => {
-      // 3. Crear Constantes de Tokens
       writer.writeLine("// --- TOKENS ---");
       this.registry.getAllTokens().forEach(token => {
-        // const IUserServiceToken = createDIToken("IUserService");
-        writer.writeLine(`const ${token.id}Token = createDIToken("${token.id}");`);
+        const typeRef = getImportRef(token.filePath, token.nodeName);
+        writer.writeLine(`const ${token.id}Token = createDIToken<${typeRef}>().as("${token.id}");`);
       });
 
       writer.writeLine("\n// --- CONTAINER SETUP ---");
       writer.writeLine("const builder = buildDIContainer();");
 
-      // 4. Registrar dependencias
       this.registry.getAllInjectables().forEach(inj => {
         const tokenVar = `${inj.tokenName}Token`;
         
-        // Generar array de dependencias (Tokens)
         const depsArray = `[${inj.dependencies.map(d => d + "Token").join(", ")}]`;
 
         if (inj.type === "class") {
             const classRef = getImportRef(inj.filePath, inj.targetName);
             
-            // Factory Wrapper: (...args) => new Class(...args)
-            // Fioc injectará los args basados en depsArray
-            const factoryFn = `(...args) => new ${classRef}(...args)`;
+            const factoryFn = `constructorToFactory(${classRef})`;
 
             const method = inj.scope === "singleton" ? "registerSingletonFactory" 
                          : inj.scope === "scoped" ? "registerScopedFactory" 
