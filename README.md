@@ -51,6 +51,21 @@ import * as path from "path";
 })();
 ```
 
+Agrega el script de generación a tu `package.json`:
+
+```json
+{
+  "scripts": {
+    "build-di": "ts-node scripts/build-di.ts",
+    "build": "npm run build-di && npm run build",
+    "dev": "npm run build-di && npm run dev"
+  }
+}
+```
+
+> [!NOTE]
+> Puedes modificar los comandos de `build` y `dev` de acuerdo a tu proyecto.
+
 Ejecútalo antes de iniciar tu aplicación:
 
 ```bash
